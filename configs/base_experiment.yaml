@@ -1,0 +1,66 @@
+experiment:
+  name: paper1_mas_contribution_mvp
+  description: "MVP experiment for agent-level contribution attribution in LLM-MAS."
+  seed: 0
+  output_dir: results/
+
+model:
+  provider: openai_or_local
+  name: base_model
+  temperature: 0.0
+  max_tokens: 4096
+
+architecture:
+  id: dag_mapcoder
+  agents:
+    - id: recaller
+      role: researcher
+      prompt_template: prompts/researcher.md
+      permissions: [read_prompt]
+    - id: planner
+      role: planner
+      prompt_template: prompts/planner.md
+      permissions: [read_prompt]
+    - id: coder
+      role: executor
+      prompt_template: prompts/coder.md
+      permissions: [read_prompt, write_workspace, run_tests]
+    - id: debugger
+      role: debugger
+      prompt_template: prompts/debugger.md
+      permissions: [read_workspace, write_workspace, run_tests]
+  edges:
+    - [recaller, planner]
+    - [planner, coder]
+    - [coder, debugger]
+  final_authority: debugger
+
+run:
+  datasets:
+    - name: humaneval
+      split: validation
+      max_tasks: 50
+    - name: mbpp
+      split: validation
+      max_tasks: 100
+  seeds: [0, 1, 2]
+  log_traces: true
+  save_workspace_diffs: true
+
+attribution:
+  methods: [loo, shapley_sampled, banzhaf_sampled]
+  removal_protocols: [hard, bypass, null_agent]
+  shapley_samples: 64
+  banzhaf_samples: 64
+
+features:
+  graph: [degree, indegree, outdegree, weighted_degree, betweenness, pagerank, dag_depth, fan_in, fan_out]
+  role: true
+  permissions: true
+  trace: [messages_sent, messages_received, tokens_sent, tokens_received, tool_calls, tool_failures]
+  task: [dataset, difficulty, input_length, single_agent_score]
+
+metrics:
+  task: [pass_at_1, unit_test_pass_rate]
+  cost: [input_tokens, output_tokens, latency, tool_calls]
+  process: [role_violation_count, failed_tool_call_count, constraint_loss_count]
