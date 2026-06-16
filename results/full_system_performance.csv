@@ -1,8 +1,0 @@
-architecture,dataset,task_score,task_score_ci95,token_cost,token_cost_ci95,latency_seconds,latency_ci95,tool_calls,tool_calls_ci95,tasks,seeds,backend,note
-A1 PEV,HumanEval,0.795,0.004,1288,22,8.06,0.14,1.22,0.05,80,"0,1,2",deterministic_simulator,角色分离基线，verifier 提升难题表现
-A2 Chain,HumanEval,0.759,0.003,2004,34,12.29,0.21,1.98,0.02,80,"0,1,2",deterministic_simulator,串行流程增加 review 成本
-A3 DAG,MBPP,0.84,0.002,1772,20,9.55,0.11,1.82,0.03,160,"0,1,2",deterministic_simulator,并行规划与调试，质量/成本较均衡
-A4 MetaGPT-lite,MBPP,0.825,0.002,1986,23,10.99,0.13,1.96,0.02,160,"0,1,2",deterministic_simulator,SOP 角色稳定，但 token 成本较高
-A5 Star,MultiAgentBench,0.708,0.003,3412,47,16.24,0.23,1.0,0.0,120,"0,1,2",deterministic_simulator,中心调度有利于协作任务
-A6 Debate,HumanEval/MBPP,0.751,0.002,2741,37,14.65,0.2,1.01,0.01,120,"0,1,2",deterministic_simulator,投票更稳健，但 token 成本高
-A7 Graph,MultiAgentBench,0.709,0.003,5293,74,23.35,0.33,1.0,0.0,120,"0,1,2",deterministic_simulator,稠密通信适合协作场景
