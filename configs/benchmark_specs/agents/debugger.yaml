@@ -1,0 +1,12 @@
+role: debugger
+canonical_role: coder
+description: "Diagnoses failed solutions, fixes implementation errors, and revises code after feedback or tests."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: coder
+prompt_file: "configs/benchmark_specs/prompts/coder.md"
+metadata:
+  role_family: coder
+  is_alias: true

@@ -1,0 +1,12 @@
+role: verifier
+canonical_role: verifier
+description: "Checks correctness against tests, constraints, specifications, and expected behavior."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: verifier
+prompt_file: "configs/benchmark_specs/prompts/verifier.md"
+metadata:
+  role_family: verifier
+  is_alias: false

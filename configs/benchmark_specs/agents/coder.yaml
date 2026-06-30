@@ -1,0 +1,12 @@
+role: coder
+canonical_role: coder
+description: "Implements code or produces the central task artifact from the plan and task specification."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: coder
+prompt_file: "configs/benchmark_specs/prompts/coder.md"
+metadata:
+  role_family: coder
+  is_alias: false

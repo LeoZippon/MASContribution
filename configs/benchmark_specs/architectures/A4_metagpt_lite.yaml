@@ -1,0 +1,68 @@
+id: A4_metagpt_lite
+name: MetaGPT-lite SOP Workflow
+family: sop_workflow
+description: "A lightweight SOP-style workflow coordinated by a supervisor, with planning, implementation, testing, review, and final delivery."
+
+roles:
+  - supervisor
+  - planner
+  - coder
+  - tester
+  - reviewer
+  - finalizer
+
+canonical_roles:
+  supervisor: supervisor
+  planner: planner
+  coder: coder
+  tester: verifier
+  reviewer: critic
+  finalizer: finalizer
+
+entrypoint: supervisor
+terminal_nodes:
+  - final_answer
+
+edges:
+  - [supervisor, planner]
+  - [planner, coder]
+  - [coder, tester]
+  - [tester, reviewer]
+  - [reviewer, finalizer]
+  - [finalizer, supervisor]
+  - [supervisor, final_answer]
+
+orchestration:
+  execution_mode: sequential_with_supervisor
+  routing_policy: sop_fixed_order
+  aggregation_policy: supervisor_final
+  stopping_condition: supervisor_accepts_finalizer_output
+  max_rounds: 1
+
+default_permissions:
+  supervisor: supervisor
+  planner: planner
+  coder: coder
+  tester: tester
+  reviewer: reviewer
+  finalizer: finalizer
+
+recommended_datasets:
+  - humaneval
+  - mbpp
+  - teambench
+  - swebench_lite
+
+attribution_notes:
+  removal_protocols: [hard_removal, bypass_removal, null_agent_replacement]
+  primary_questions:
+    - "Does SOP-style specialization improve reliability over a simple chain?"
+    - "Is supervisor contribution structural, role-based, or due to final authority?"
+    - "Do tester and reviewer contributions differ on easy versus hard tasks?"
+
+metadata:
+  node_count: 6
+  topology_type: sop_chain
+  role_preserving_rewire_compatible: true
+  paper_label: A4
+

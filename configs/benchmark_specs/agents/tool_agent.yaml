@@ -1,0 +1,12 @@
+role: tool_agent
+canonical_role: tool_agent
+description: "Calls tools, executes utility functions, and returns structured tool results to the team."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: tool_agent
+prompt_file: "configs/benchmark_specs/prompts/coder.md"
+metadata:
+  role_family: tool_agent
+  is_alias: false

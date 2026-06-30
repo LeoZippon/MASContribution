@@ -1,0 +1,131 @@
+id: exp07_permission_intervention
+stage: 7
+name: Permission-only intervention
+purpose: Estimate the independent contribution of tool access, write access, routing authority, memory,
+  and final-answer authority.
+depends_on:
+- exp03_loo_attribution
+- exp06_role_intervention
+research_questions:
+- RQ5
+hypotheses:
+- H4
+- H5
+datasets:
+- name: humaneval
+  task_file: data/processed/tasks/humaneval_tasks.jsonl
+  split: test
+  max_tasks: 100
+  task_selection: deterministic_first
+- name: mbpp
+  task_file: data/processed/tasks/mbpp_tasks.jsonl
+  split: test
+  max_tasks: 200
+  task_selection: deterministic_first
+base_architectures:
+- A2_chain
+- A3_dag
+- A5_star
+- A7_graph
+permission_interventions:
+- id: verifier_tool_access
+  role: verifier
+  toggle: run_tests
+  levels:
+  - false
+  - true
+- id: coder_write_access
+  role: coder
+  toggle: write_solution
+  levels:
+  - false
+  - true
+- id: finalizer_final_authority
+  role: finalizer
+  toggle: final_answer
+  levels:
+  - false
+  - true
+- id: supervisor_routing_authority
+  role: supervisor
+  toggle: route_messages
+  levels:
+  - false
+  - true
+- id: researcher_private_information
+  role: researcher
+  toggle: private_information_access
+  levels:
+  - false
+  - true
+- id: memory_manager_memory_rw
+  role: memory_manager
+  toggles:
+  - read_memory
+  - write_memory
+  levels:
+  - none
+  - read_only
+  - read_write
+- id: tool_agent_tool_access
+  role: tool_agent
+  toggle: call_tools
+  levels:
+  - false
+  - true
+attribution:
+  methods:
+  - loo
+  - shapley_sampled
+  removal_protocol: null_agent_replacement
+  permutation_samples: 64
+analysis:
+  effect_targets:
+  - tool_access_effect
+  - write_access_effect
+  - routing_authority_effect
+  - final_authority_effect
+  - information_access_effect
+  - memory_effect
+  tests:
+  - paired_test
+  - mixed_effects_regression
+  - fdr_correction
+seeds:
+- 0
+- 1
+- 2
+outputs:
+  run_dir: data/runs/interventions/permission
+  trace_dir: data/traces/interventions/permission
+  attribution_file: data/results/attribution/permission_intervention_attribution.jsonl
+  statistics_file: data/results/statistics/permission_intervention.jsonl
+benchmark_specs:
+  architecture_dir: configs/benchmark_specs/architectures
+  agent_dir: configs/benchmark_specs/agents
+  prompt_dir: configs/benchmark_specs/prompts
+  permission_file: configs/benchmark_specs/permissions/permission_sets.yaml
+model:
+  name: ${MODEL_NAME}
+  homogeneous: true
+  temperature: 0.2
+  max_tokens: 2048
+logging:
+  save_run_records: true
+  save_full_trace: true
+  save_tool_calls: true
+  save_intermediate_outputs: true
+  save_cost: true
+  save_failure_type: true
+  trace_graphs:
+  - design_graph
+  - trace_graph
+  - dependency_graph
+evaluation:
+  primary_utility: task
+  secondary_utilities:
+  - net
+  - process
+  code_task_metric: pass_at_1
+  non_code_task_metric: official_score
+  bootstrap_confidence_interval: true

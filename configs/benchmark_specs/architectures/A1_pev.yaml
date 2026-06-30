@@ -1,0 +1,53 @@
+id: A1_pev
+name: Planner-Executor-Verifier
+family: linear_workflow
+description: "A minimal role-separated workflow: plan the solution, execute the main task, then verify correctness."
+
+roles:
+  - planner
+  - executor
+  - verifier
+
+canonical_roles:
+  planner: planner
+  executor: coder
+  verifier: verifier
+
+entrypoint: planner
+terminal_nodes:
+  - final_answer
+
+edges:
+  - [planner, executor]
+  - [executor, verifier]
+  - [verifier, final_answer]
+
+orchestration:
+  execution_mode: sequential
+  routing_policy: fixed_order
+  aggregation_policy: verifier_final
+  stopping_condition: verifier_returns_final_or_failure
+  max_rounds: 1
+
+default_permissions:
+  planner: planner
+  executor: executor
+  verifier: verifier
+
+recommended_datasets:
+  - humaneval
+  - mbpp
+  - teambench
+
+attribution_notes:
+  removal_protocols: [hard_removal, bypass_removal, null_agent_replacement]
+  primary_questions:
+    - "How much does explicit planning help code-task performance?"
+    - "When does verification improve or hurt final score?"
+    - "Does final authority inflate verifier contribution?"
+
+metadata:
+  node_count: 3
+  topology_type: chain
+  role_preserving_rewire_compatible: true
+  paper_label: A1

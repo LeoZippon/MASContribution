@@ -1,0 +1,105 @@
+id: exp08_generalization
+stage: 8
+name: Cross-dataset and complex-task generalization
+purpose: Test whether contribution patterns learned from code tasks generalize to role-collaboration and
+  tool-heavy tasks.
+depends_on:
+- exp03_loo_attribution
+- exp07_permission_intervention
+research_questions:
+- RQ1
+- RQ2
+- RQ4
+- RQ5
+- RQ6
+hypotheses:
+- H2
+- H4
+- H5
+- H8
+- H9
+datasets:
+- name: teambench
+  task_file: data/processed/tasks/teambench_tasks.jsonl
+  split: test
+  max_tasks: 150
+  task_selection: stratified_by_task_type
+- name: multiagentbench
+  task_file: data/processed/tasks/multiagentbench_tasks.jsonl
+  split: test
+  max_tasks: 120
+  task_selection: stratified_by_task_type
+- name: marble
+  task_file: data/processed/tasks/marble_tasks.jsonl
+  split: test
+  max_tasks: 9
+  task_selection: all
+- name: swebench_lite
+  task_file: data/processed/tasks/swebench_lite_tasks.jsonl
+  split: test
+  max_tasks: 50
+  task_selection: stratified_by_difficulty
+architectures:
+  include:
+  - A3_dag
+  - A4_metagpt_lite
+  - A5_star
+  - A6_debate
+  - A7_graph
+  compatibility_policy: skip_incompatible_task_architecture_pairs
+attribution:
+  methods:
+  - loo
+  - banzhaf_sampled
+  - myerson_sampled
+  removal_protocol: null_agent_replacement
+  banzhaf_samples: 128
+  myerson_graph: design_graph
+analysis:
+  compare_to_core_tasks: true
+  generalization_axes:
+  - dataset
+  - task_type
+  - difficulty
+  - tool_requirement
+  tests:
+  - mixed_effects_regression
+  - rank_stability
+seeds:
+- 0
+- 1
+- 2
+outputs:
+  run_dir: data/runs/generalization
+  trace_dir: data/traces/generalization
+  attribution_file: data/results/attribution/generalization_attribution.jsonl
+  statistics_file: data/results/statistics/generalization.jsonl
+benchmark_specs:
+  architecture_dir: configs/benchmark_specs/architectures
+  agent_dir: configs/benchmark_specs/agents
+  prompt_dir: configs/benchmark_specs/prompts
+  permission_file: configs/benchmark_specs/permissions/permission_sets.yaml
+model:
+  name: ${MODEL_NAME}
+  homogeneous: true
+  temperature: 0.2
+  max_tokens: 2048
+logging:
+  save_run_records: true
+  save_full_trace: true
+  save_tool_calls: true
+  save_intermediate_outputs: true
+  save_cost: true
+  save_failure_type: true
+  trace_graphs:
+  - design_graph
+  - trace_graph
+  - dependency_graph
+evaluation:
+  primary_utility: task
+  secondary_utilities:
+  - net
+  - process
+  code_task_metric: pass_at_1
+  non_code_task_metric: official_score
+  bootstrap_confidence_interval: true

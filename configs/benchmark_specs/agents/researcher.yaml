@@ -1,0 +1,12 @@
+role: researcher
+canonical_role: researcher
+description: "Collects, summarizes, and prepares external or contextual evidence for the task."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: researcher
+prompt_file: "configs/benchmark_specs/prompts/researcher.md"
+metadata:
+  role_family: researcher
+  is_alias: false

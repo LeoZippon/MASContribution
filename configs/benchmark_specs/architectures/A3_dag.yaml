@@ -1,0 +1,66 @@
+id: A3_dag
+name: DAG Workflow
+family: dag_workflow
+description: "A directed acyclic workflow with parallel context retrieval and implementation, followed by debugging, testing, and finalization."
+
+roles:
+  - planner
+  - retriever
+  - coder
+  - debugger
+  - tester
+  - finalizer
+
+canonical_roles:
+  planner: planner
+  retriever: researcher
+  coder: coder
+  debugger: debugger
+  tester: verifier
+  finalizer: finalizer
+
+entrypoint: planner
+terminal_nodes:
+  - final_answer
+
+edges:
+  - [planner, retriever]
+  - [planner, coder]
+  - [retriever, coder]
+  - [coder, debugger]
+  - [debugger, tester]
+  - [tester, finalizer]
+  - [finalizer, final_answer]
+
+orchestration:
+  execution_mode: dag
+  routing_policy: dependency_order
+  aggregation_policy: finalizer_final
+  stopping_condition: finalizer_returns_answer
+  max_rounds: 1
+
+default_permissions:
+  planner: planner
+  retriever: retriever
+  coder: coder
+  debugger: debugger
+  tester: tester
+  finalizer: finalizer
+
+recommended_datasets:
+  - humaneval
+  - mbpp
+  - swebench_lite
+
+attribution_notes:
+  removal_protocols: [hard_removal, bypass_removal, null_agent_replacement]
+  primary_questions:
+    - "Does explicit debugging have independent contribution beyond coding?"
+    - "Does retrieval/context preparation help difficult or long-context tasks?"
+    - "Do DAG depth and fan-in/fan-out explain contribution?"
+
+metadata:
+  node_count: 6
+  topology_type: dag
+  role_preserving_rewire_compatible: true
+  paper_label: A3

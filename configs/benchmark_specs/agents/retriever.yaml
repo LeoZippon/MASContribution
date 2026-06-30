@@ -1,0 +1,12 @@
+role: retriever
+canonical_role: researcher
+description: "Retrieves relevant information, documents, examples, or contextual evidence for downstream agents."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: researcher
+prompt_file: "configs/benchmark_specs/prompts/researcher.md"
+metadata:
+  role_family: researcher
+  is_alias: true

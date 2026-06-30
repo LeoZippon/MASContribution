@@ -1,0 +1,72 @@
+id: A5_star
+name: Supervisor-Worker Star
+family: centralized_coordination
+description: "A star topology where a supervisor mediates communication among specialized workers and decides the final output."
+
+roles:
+  - supervisor
+  - planner
+  - coder
+  - verifier
+  - critic
+  - researcher
+
+canonical_roles:
+  supervisor: supervisor
+  planner: planner
+  coder: coder
+  verifier: verifier
+  critic: critic
+  researcher: researcher
+
+entrypoint: supervisor
+terminal_nodes:
+  - final_answer
+
+edges:
+  - [supervisor, planner]
+  - [planner, supervisor]
+  - [supervisor, researcher]
+  - [researcher, supervisor]
+  - [supervisor, coder]
+  - [coder, supervisor]
+  - [supervisor, verifier]
+  - [verifier, supervisor]
+  - [supervisor, critic]
+  - [critic, supervisor]
+  - [supervisor, final_answer]
+
+orchestration:
+  execution_mode: star
+  routing_policy: supervisor_mediated
+  aggregation_policy: supervisor_final
+  stopping_condition: supervisor_selects_or_synthesizes_answer
+  max_rounds: 2
+
+default_permissions:
+  supervisor: supervisor
+  planner: planner
+  researcher: researcher
+  coder: coder
+  verifier: verifier
+  critic: critic
+
+recommended_datasets:
+  - humaneval
+  - mbpp
+  - teambench
+  - multiagentbench
+  - marble
+
+attribution_notes:
+  removal_protocols: [hard_removal, null_agent_replacement, weak_model_replacement]
+  primary_questions:
+    - "Does high degree make the supervisor genuinely high contribution?"
+    - "How much contribution comes from routing authority and final authority?"
+    - "Can task dependencies remain plan-code-check while communication is star-shaped?"
+
+metadata:
+  node_count: 6
+  topology_type: star
+  role_preserving_rewire_compatible: true
+  paper_label: A5

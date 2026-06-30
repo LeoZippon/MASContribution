@@ -1,0 +1,88 @@
+id: A7_graph
+name: Graph Coordination
+family: graph_coordination
+description: "A richer coordination graph with supervision, retrieval, tool use, memory, implementation, critique, verification, and finalization."
+
+roles:
+  - supervisor
+  - planner
+  - retriever
+  - memory_manager
+  - tool_agent
+  - coder
+  - critic
+  - verifier
+  - finalizer
+
+canonical_roles:
+  supervisor: supervisor
+  planner: planner
+  retriever: researcher
+  memory_manager: memory_manager
+  tool_agent: tool_agent
+  coder: coder
+  critic: critic
+  verifier: verifier
+  finalizer: finalizer
+
+entrypoint: supervisor
+terminal_nodes:
+  - final_answer
+
+edges:
+  - [supervisor, planner]
+  - [supervisor, retriever]
+  - [supervisor, memory_manager]
+  - [planner, retriever]
+  - [retriever, memory_manager]
+  - [memory_manager, planner]
+  - [planner, coder]
+  - [retriever, coder]
+  - [coder, tool_agent]
+  - [tool_agent, coder]
+  - [coder, critic]
+  - [critic, coder]
+  - [coder, verifier]
+  - [tool_agent, verifier]
+  - [critic, verifier]
+  - [verifier, finalizer]
+  - [memory_manager, finalizer]
+  - [finalizer, supervisor]
+  - [supervisor, final_answer]
+
+orchestration:
+  execution_mode: graph
+  routing_policy: graph_state_based
+  aggregation_policy: supervisor_final
+  stopping_condition: supervisor_accepts_finalizer_output
+  max_rounds: 3
+
+default_permissions:
+  supervisor: supervisor
+  planner: planner
+  retriever: retriever
+  memory_manager: memory_manager
+  tool_agent: tool_agent
+  coder: coder
+  critic: critic
+  verifier: verifier
+  finalizer: finalizer
+
+recommended_datasets:
+  - teambench
+  - multiagentbench
+  - marble
+  - swebench_lite
+
+attribution_notes:
+  removal_protocols: [hard_removal, null_agent_replacement, weak_model_replacement]
+  primary_questions:
+    - "Do Myerson-style graph constraints change contribution allocation?"
+    - "Do memory and tool access create information or permission bottlenecks?"
+    - "Which graph-centrality features best predict critical agents?"
+
+metadata:
+  node_count: 9
+  topology_type: graph
+  role_preserving_rewire_compatible: true
+  paper_label: A7

@@ -1,0 +1,12 @@
+role: planner
+canonical_role: planner
+description: "Decomposes the task, identifies constraints, and produces an execution plan for downstream agents."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: planner
+prompt_file: "configs/benchmark_specs/prompts/planner.md"
+metadata:
+  role_family: planner
+  is_alias: false

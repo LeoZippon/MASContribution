@@ -1,0 +1,115 @@
+default:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: false
+  run_tests: false
+  write_solution: false
+  final_answer: false
+  route_messages: false
+  read_memory: false
+  write_memory: false
+  private_information_access: false
+
+planner:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: false
+  run_tests: false
+  write_solution: false
+  final_answer: false
+
+coder:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: true
+  run_tests: true
+  write_solution: true
+  final_answer: false
+
+executor:
+  inherit_from: coder
+
+debugger:
+  inherit_from: coder
+
+verifier:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: true
+  run_tests: true
+  write_solution: false
+  final_answer: false
+
+tester:
+  inherit_from: verifier
+
+critic:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: false
+  run_tests: false
+  write_solution: false
+  final_answer: false
+
+reviewer:
+  inherit_from: critic
+
+researcher:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: true
+  run_tests: false
+  write_solution: false
+  final_answer: false
+  private_information_access: true
+
+retriever:
+  inherit_from: researcher
+
+supervisor:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: false
+  run_tests: false
+  write_solution: false
+  route_messages: true
+  final_answer: true
+
+finalizer:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: false
+  run_tests: false
+  write_solution: false
+  final_answer: true
+
+aggregator:
+  inherit_from: finalizer
+
+memory_manager:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: false
+  run_tests: false
+  write_solution: false
+  final_answer: false
+  read_memory: true
+  write_memory: true
+
+tool_agent:
+  read_task: true
+  send_message: true
+  receive_message: true
+  call_tools: true
+  run_tests: true
+  write_solution: false
+  final_answer: false

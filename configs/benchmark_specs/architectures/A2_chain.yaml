@@ -1,0 +1,57 @@
+id: A2_chain
+name: Chain
+family: linear_workflow
+description: "A longer sequential workflow with planning, implementation, critique, and final synthesis."
+
+roles:
+  - planner
+  - coder
+  - reviewer
+  - finalizer
+
+canonical_roles:
+  planner: planner
+  coder: coder
+  reviewer: critic
+  finalizer: finalizer
+
+entrypoint: planner
+terminal_nodes:
+  - final_answer
+
+edges:
+  - [planner, coder]
+  - [coder, reviewer]
+  - [reviewer, finalizer]
+  - [finalizer, final_answer]
+
+orchestration:
+  execution_mode: sequential
+  routing_policy: fixed_order
+  aggregation_policy: finalizer_final
+  stopping_condition: finalizer_returns_answer
+  max_rounds: 1
+
+default_permissions:
+  planner: planner
+  coder: coder
+  reviewer: reviewer
+  finalizer: finalizer
+
+recommended_datasets:
+  - humaneval
+  - mbpp
+  - teambench
+
+attribution_notes:
+  removal_protocols: [hard_removal, bypass_removal, null_agent_replacement]
+  primary_questions:
+    - "Does adding a review stage improve quality enough to justify cost?"
+    - "Does contribution concentrate upstream or downstream in a chain?"
+    - "How well does LOO approximate Shapley in a workflow-style MAS?"
+
+metadata:
+  node_count: 4
+  topology_type: chain
+  role_preserving_rewire_compatible: true
+  paper_label: A2

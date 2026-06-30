@@ -1,0 +1,12 @@
+role: critic
+canonical_role: critic
+description: "Finds flaws, weak assumptions, missing requirements, and alternative interpretations."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: critic
+prompt_file: "configs/benchmark_specs/prompts/critic.md"
+metadata:
+  role_family: critic
+  is_alias: false

@@ -1,0 +1,22 @@
+[project]
+name = "mas-contribution-bench"
+version = "0.1.0"
+description = "Benchmark framework for agent-level contribution attribution in LLM multi-agent systems."
+requires-python = ">=3.10"
+dependencies = [
+  "langgraph",
+  "langchain",
+  "pydantic",
+  "pyyaml",
+  "pandas",
+  "numpy",
+  "scipy",
+  "scikit-learn",
+  "networkx",
+  "tqdm",
+  "jsonlines",
+  "pyarrow"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

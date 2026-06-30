@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+.env
+*.log
+
+data/raw/
+data/runs/
+data/traces/
+data/results/
+outputs/
+
+*.zip
+# Processed task data may contain secret-like benchmark strings
+data/processed/tasks/*.jsonl
+data/processed/prepare_data_summary.json

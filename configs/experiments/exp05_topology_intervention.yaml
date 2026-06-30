@@ -1,0 +1,177 @@
+id: exp05_topology_intervention
+stage: 5
+name: Role-preserving topology rewiring
+purpose: Separate topology effects from role effects by fixing roles, permissions, model, and tasks while
+  changing communication topology.
+depends_on:
+- exp03_loo_attribution
+- exp04_shapley_banzhaf_attribution
+research_questions:
+- RQ4
+- RQ6
+hypotheses:
+- H1
+- H2
+- H3
+- H8
+datasets:
+- name: humaneval
+  task_file: data/processed/tasks/humaneval_tasks.jsonl
+  split: test
+  max_tasks: 100
+  task_selection: deterministic_first
+- name: mbpp
+  task_file: data/processed/tasks/mbpp_tasks.jsonl
+  split: test
+  max_tasks: 200
+  task_selection: deterministic_first
+controlled_role_set:
+- planner
+- coder
+- verifier
+- critic
+- finalizer
+controlled_permission_set:
+  planner: planner
+  coder: coder
+  verifier: verifier
+  critic: critic
+  finalizer: finalizer
+topology_variants:
+- id: controlled_chain
+  template: chain
+  edges:
+  - - planner
+    - coder
+  - - coder
+    - verifier
+  - - verifier
+    - critic
+  - - critic
+    - finalizer
+  - - finalizer
+    - final_answer
+- id: controlled_star
+  template: star
+  center: finalizer
+  edges:
+  - - finalizer
+    - planner
+  - - planner
+    - finalizer
+  - - finalizer
+    - coder
+  - - coder
+    - finalizer
+  - - finalizer
+    - verifier
+  - - verifier
+    - finalizer
+  - - finalizer
+    - critic
+  - - critic
+    - finalizer
+  - - finalizer
+    - final_answer
+- id: controlled_dag
+  template: dag
+  edges:
+  - - planner
+    - coder
+  - - planner
+    - verifier
+  - - coder
+    - critic
+  - - verifier
+    - critic
+  - - critic
+    - finalizer
+  - - finalizer
+    - final_answer
+- id: controlled_debate
+  template: debate
+  edges:
+  - - planner
+    - coder
+  - - coder
+    - planner
+  - - planner
+    - verifier
+  - - verifier
+    - planner
+  - - coder
+    - critic
+  - - critic
+    - coder
+  - - verifier
+    - critic
+  - - critic
+    - verifier
+  - - planner
+    - finalizer
+  - - coder
+    - finalizer
+  - - verifier
+    - finalizer
+  - - critic
+    - finalizer
+  - - finalizer
+    - final_answer
+attribution:
+  methods:
+  - loo
+  - shapley_sampled
+  removal_protocol: null_agent_replacement
+  permutation_samples: 64
+analysis:
+  topology_features:
+  - degree
+  - in_degree
+  - out_degree
+  - betweenness
+  - closeness
+  - pagerank
+  - dag_depth
+  - fan_in
+  - fan_out
+  tests:
+  - paired_test
+  - mixed_effects_regression
+seeds:
+- 0
+- 1
+- 2
+outputs:
+  run_dir: data/runs/interventions/topology
+  trace_dir: data/traces/interventions/topology
+  attribution_file: data/results/attribution/topology_intervention_attribution.jsonl
+  statistics_file: data/results/statistics/topology_intervention.jsonl
+benchmark_specs:
+  architecture_dir: configs/benchmark_specs/architectures
+  agent_dir: configs/benchmark_specs/agents
+  prompt_dir: configs/benchmark_specs/prompts
+  permission_file: configs/benchmark_specs/permissions/permission_sets.yaml
+model:
+  name: ${MODEL_NAME}
+  homogeneous: true
+  temperature: 0.2
+  max_tokens: 2048
+logging:
+  save_run_records: true
+  save_full_trace: true
+  save_tool_calls: true
+  save_intermediate_outputs: true
+  save_cost: true
+  save_failure_type: true
+  trace_graphs:
+  - design_graph
+  - trace_graph
+  - dependency_graph
+evaluation:
+  primary_utility: task
+  secondary_utilities:
+  - net
+  - process
+  code_task_metric: pass_at_1
+  non_code_task_metric: official_score
+  bootstrap_confidence_interval: true

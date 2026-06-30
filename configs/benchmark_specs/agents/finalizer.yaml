@@ -1,0 +1,12 @@
+role: finalizer
+canonical_role: finalizer
+description: "Synthesizes intermediate artifacts and produces the final answer."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: finalizer
+prompt_file: "configs/benchmark_specs/prompts/finalizer.md"
+metadata:
+  role_family: finalizer
+  is_alias: false

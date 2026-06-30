@@ -1,0 +1,70 @@
+id: A6_debate
+name: Debate / Committee
+family: deliberative_coordination
+description: "A committee-style architecture with multiple candidate producers, critique, verification, and aggregation."
+
+roles:
+  - planner
+  - coder
+  - debugger
+  - critic
+  - verifier
+  - aggregator
+
+canonical_roles:
+  planner: planner
+  coder: coder
+  debugger: debugger
+  critic: critic
+  verifier: verifier
+  aggregator: finalizer
+
+entrypoint: planner
+terminal_nodes:
+  - final_answer
+
+edges:
+  - [planner, coder]
+  - [planner, debugger]
+  - [coder, critic]
+  - [debugger, critic]
+  - [critic, coder]
+  - [critic, debugger]
+  - [coder, verifier]
+  - [debugger, verifier]
+  - [critic, verifier]
+  - [verifier, aggregator]
+  - [aggregator, final_answer]
+
+orchestration:
+  execution_mode: debate
+  routing_policy: committee_rounds
+  aggregation_policy: aggregator_final
+  stopping_condition: aggregator_returns_consensus_or_best_answer
+  max_rounds: 2
+
+default_permissions:
+  planner: planner
+  coder: coder
+  debugger: debugger
+  critic: critic
+  verifier: verifier
+  aggregator: aggregator
+
+recommended_datasets:
+  - humaneval
+  - mbpp
+  - multiagentbench
+
+attribution_notes:
+  removal_protocols: [hard_removal, null_agent_replacement, weak_model_replacement]
+  primary_questions:
+    - "When does redundancy make LOO diverge from Shapley?"
+    - "Do critic and verifier provide complementary contributions?"
+    - "Does aggregation authority dominate debate contribution scores?"
+
+metadata:
+  node_count: 6
+  topology_type: debate
+  role_preserving_rewire_compatible: true
+  paper_label: A6

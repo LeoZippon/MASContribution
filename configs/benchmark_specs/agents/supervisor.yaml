@@ -1,0 +1,12 @@
+role: supervisor
+canonical_role: supervisor
+description: "Routes messages, assigns work, manages coordination, and may make final orchestration decisions."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: supervisor
+prompt_file: "configs/benchmark_specs/prompts/supervisor.md"
+metadata:
+  role_family: supervisor
+  is_alias: false

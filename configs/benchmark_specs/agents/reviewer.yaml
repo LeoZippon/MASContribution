@@ -1,0 +1,12 @@
+role: reviewer
+canonical_role: critic
+description: "Reviews intermediate artifacts for quality, correctness, and specification compliance."
+model: "${MODEL_NAME}"
+temperature: 0.2
+max_tokens: 2048
+permissions:
+  inherit_from: critic
+prompt_file: "configs/benchmark_specs/prompts/critic.md"
+metadata:
+  role_family: critic
+  is_alias: true
