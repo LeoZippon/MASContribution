@@ -1,7 +1,7 @@
 id: A5_star
 name: Supervisor-Worker Star
 family: centralized_coordination
-description: "A star topology where a supervisor mediates communication among specialized workers and decides the final output."
+description: "A star topology where a supervisor mediates communication among specialized workers, then a finalizer produces the final output."
 
 roles:
   - supervisor
@@ -10,6 +10,7 @@ roles:
   - verifier
   - critic
   - researcher
+  - finalizer
 
 canonical_roles:
   supervisor: supervisor
@@ -18,6 +19,7 @@ canonical_roles:
   verifier: verifier
   critic: critic
   researcher: researcher
+  finalizer: finalizer
 
 entrypoint: supervisor
 terminal_nodes:
@@ -34,13 +36,14 @@ edges:
   - [verifier, supervisor]
   - [supervisor, critic]
   - [critic, supervisor]
-  - [supervisor, final_answer]
+  - [supervisor, finalizer]
+  - [finalizer, final_answer]
 
 orchestration:
   execution_mode: star
   routing_policy: supervisor_mediated
-  aggregation_policy: supervisor_final
-  stopping_condition: supervisor_selects_or_synthesizes_answer
+  aggregation_policy: supervisor_to_finalizer
+  stopping_condition: finalizer_emits_executable_answer
   max_rounds: 2
 
 default_permissions:
@@ -50,6 +53,7 @@ default_permissions:
   coder: coder
   verifier: verifier
   critic: critic
+  finalizer: finalizer
 
 recommended_datasets:
   - humaneval
@@ -66,7 +70,7 @@ attribution_notes:
     - "Can task dependencies remain plan-code-check while communication is star-shaped?"
 
 metadata:
-  node_count: 6
+  node_count: 7
   topology_type: star
   role_preserving_rewire_compatible: true
   paper_label: A5

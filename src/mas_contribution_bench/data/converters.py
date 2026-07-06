@@ -8,6 +8,7 @@ processed task can be traced back to the original dataset file.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -89,6 +90,8 @@ def _first_existing(paths: Iterable[Path]) -> Path | None:
 def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
+    if hasattr(value, "tolist"):
+        value = value.tolist()
     if isinstance(value, list):
         return value
     if isinstance(value, tuple):
@@ -97,13 +100,41 @@ def _as_list(value: Any) -> list[Any]:
 
 
 def _stringify_tests(value: Any) -> str | None:
-    if value is None:
+    """Serialize test imports/asserts as one executable statement per line.
+
+    Pandas can return MBPP parquet list columns as numpy arrays. Calling str()
+    on those arrays drops commas and can corrupt quoted string literals, so we
+    normalize array-like values before writing processed JSONL.
+    """
+    items = _as_list(value)
+    cleaned = [str(item).strip() for item in items if str(item).strip() and str(item).strip() != "[]"]
+    if not cleaned:
         return None
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return "\n".join(str(item) for item in value)
-    return str(value)
+    return "\n".join(cleaned)
+
+
+def _infer_entry_point_from_code(code: Any) -> str | None:
+    match = re.search(r"^\s*def\s+([A-Za-z_]\w*)\s*\(", str(code or ""), flags=re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def _infer_entry_point_from_tests(tests_text: str | None) -> str | None:
+    if not tests_text:
+        return None
+    match = re.search(r"\bassert\s+([A-Za-z_]\w*)\s*\(", tests_text)
+    return match.group(1) if match else None
+
+
+def _augment_code_prompt(prompt: str, entry_point: str | None, tests_text: str | None) -> str:
+    parts = [prompt.strip()]
+    if entry_point:
+        parts.append(f"Required function name / entry point: {entry_point}")
+    if tests_text:
+        visible_tests = "\n".join(line for line in tests_text.splitlines() if line.strip().startswith("assert "))
+        if visible_tests:
+            parts.append("Your solution must pass these assert tests:\n" + visible_tests)
+    parts.append("Return only executable Python code for the solution.")
+    return "\n\n".join(part for part in parts if part)
 
 
 def _first_present(record: dict[str, Any], keys: list[str]) -> Any:
@@ -239,18 +270,22 @@ def convert_mbpp(raw_dir: Path, out_file: Path, subset: str = "sanitized") -> in
             test_imports = record.get("test_imports")
             test_setup = record.get("test_setup_code")
             tests_text = _stringify_tests(tests)
-            if test_imports is not None:
-                tests_text = _stringify_tests(test_imports) + "\n" + (tests_text or "")
-            if test_setup is not None:
-                tests_text = str(test_setup) + "\n" + (tests_text or "")
+            imports_text = _stringify_tests(test_imports)
+            if imports_text:
+                tests_text = imports_text + ("\n" + tests_text if tests_text else "")
+            if test_setup:
+                tests_text = str(test_setup).strip() + ("\n" + tests_text if tests_text else "")
+            entry_point = _infer_entry_point_from_tests(tests_text) or _infer_entry_point_from_code(code)
+            augmented_prompt = _augment_code_prompt(prompt, entry_point, tests_text)
 
             yield TaskRecord(
                 task_id=f"mbpp/{subset}/{split}/{raw_task_id}",
                 dataset=DatasetName.MBPP,
                 split=split,
                 task_type=TaskType.CODE_GENERATION,
-                prompt=prompt,
+                prompt=augmented_prompt,
                 output_format="python_function",
+                entry_point=entry_point,
                 reference_solution=code,
                 tests=tests_text,
                 evaluation=EvaluationConfig(

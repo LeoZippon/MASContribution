@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import os
 from pathlib import Path
+import shutil
 from typing import Any
 
-from mas_contribution_bench.agents import build_agents
+from mas_contribution_bench.agents import DeepSeekModelClient, DryRunModelClient, build_agents
 from mas_contribution_bench.config import ExperimentSpec, load_experiment_spec
 from mas_contribution_bench.data.loaders import load_jsonl_tasks
 from mas_contribution_bench.data.schemas import (
@@ -20,7 +21,7 @@ from mas_contribution_bench.data.schemas import (
 from mas_contribution_bench.evaluation import evaluate_task_output
 from mas_contribution_bench.graphs import MASGraphBuilder
 from mas_contribution_bench.tracing import build_trace_records, trace_cost
-from mas_contribution_bench.utils.io import append_jsonl, ensure_dir, stable_id, write_jsonl
+from mas_contribution_bench.utils.io import append_jsonl, ensure_dir, iter_jsonl, stable_id, write_jsonl
 from mas_contribution_bench.utils.seeds import set_seed
 
 
@@ -34,6 +35,29 @@ def should_execute_code(experiment: ExperimentSpec) -> bool:
     evaluation_cfg = experiment.raw.get("evaluation") or {}
     return bool(evaluation_cfg.get("execute_code", False))
 
+
+
+def model_backend(experiment: ExperimentSpec) -> str:
+    return (
+        os.getenv("MAS_MODEL_BACKEND")
+        or (experiment.raw.get("model") or {}).get("backend")
+        or "dry-run"
+    ).lower()
+
+
+def build_model_client(experiment: ExperimentSpec):
+    backend = model_backend(experiment)
+    if backend in {"dry-run", "dry_run", "dryrun", "mock"}:
+        return DryRunModelClient()
+    if backend == "deepseek":
+        model_cfg = experiment.raw.get("model") or {}
+        return DeepSeekModelClient(
+            default_model=os.getenv("DEEPSEEK_MODEL") or model_cfg.get("name") or model_cfg.get("model") or "deepseek-chat",
+            timeout_seconds=float(os.getenv("DEEPSEEK_TIMEOUT", model_cfg.get("timeout_seconds", 120))),
+            max_retries=int(os.getenv("DEEPSEEK_MAX_RETRIES", model_cfg.get("max_retries", 3))),
+            retry_backoff_seconds=float(os.getenv("DEEPSEEK_RETRY_BACKOFF", model_cfg.get("retry_backoff_seconds", 2.0))),
+        )
+    raise ValueError(f"Unsupported MAS_MODEL_BACKEND: {backend}")
 
 def sandbox_backend(experiment: ExperimentSpec) -> str:
     return (
@@ -83,7 +107,12 @@ def run_mas_once(
     set_seed(seed)
     architecture = experiment.benchmark.architectures[architecture_id]
     active_roles = [role for role in architecture.roles if role not in (removed_agents or set())]
-    agents = build_agents(experiment.benchmark.agents, architecture.roles, model_overrides=experiment.raw.get("model", {}))
+    agents = build_agents(
+        experiment.benchmark.agents,
+        architecture.roles,
+        model_client=build_model_client(experiment),
+        model_overrides=experiment.raw.get("model", {}),
+    )
     null_replacement = removal_protocol == "null_agent_replacement"
     graph = MASGraphBuilder(
         architecture=architecture,
@@ -121,10 +150,28 @@ def run_mas_once(
         status=RunStatus.SUCCEEDED,
         cost=cost,
         failure_type=evaluation.failure_type,
-        metadata={"dry_run": not should_execute_code(experiment)},
+        metadata={"dry_run": model_backend(experiment) in {"dry-run", "dry_run", "dryrun", "mock"}, "model_backend": model_backend(experiment)},
     )
     return run, trace_records, evaluation
 
+
+
+def completed_run_ids(path: str | Path) -> set[str]:
+    return {str(row.get("run_id")) for row in iter_jsonl(path) if row.get("run_id")}
+
+
+def backup_existing_file(path: str | Path, *, enabled: bool = True) -> Path | None:
+    path = Path(path)
+    if not enabled or not path.exists() or path.stat().st_size == 0:
+        return None
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup = path.with_name(f"{path.stem}.backup_{stamp}{path.suffix}")
+    shutil.copy2(path, backup)
+    return backup
+
+
+def print_progress(message: str) -> None:
+    print(message, flush=True)
 
 def write_run_bundle(
     experiment: ExperimentSpec,

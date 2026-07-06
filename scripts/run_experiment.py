@@ -103,6 +103,13 @@ def main() -> int:
         default=None,
         help="Sandbox backend for --execute-code. Use docker for formal experiments.",
     )
+    parser.add_argument(
+        "--model-backend",
+        choices=["dry-run", "deepseek"],
+        default=None,
+        help="Model backend. Default is dry-run unless MAS_MODEL_BACKEND is set.",
+    )
+    parser.add_argument("--model-name", type=str, default=None, help="Model name, e.g. deepseek-chat.")
     parser.add_argument("--print-config", action="store_true", help="Print parsed experiment id and exit.")
     args = parser.parse_args()
 
@@ -113,6 +120,10 @@ def main() -> int:
         return 0
 
     runner = infer_runner(experiment.experiment_id, args.mode)
+    if args.model_backend:
+        os.environ["MAS_MODEL_BACKEND"] = args.model_backend
+    if args.model_name:
+        os.environ["DEEPSEEK_MODEL"] = args.model_name
     if args.execute_code:
         os.environ["MAS_EXECUTE_CODE"] = "1"
     if args.sandbox_backend:

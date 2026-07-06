@@ -9,9 +9,8 @@ data/raw/
 data/runs/
 data/traces/
 data/results/
+data/processed/tasks/*.jsonl
+data/processed/prepare_data_summary.json
 outputs/
 
 *.zip
-# Processed task data may contain secret-like benchmark strings
-data/processed/tasks/*.jsonl
-data/processed/prepare_data_summary.json

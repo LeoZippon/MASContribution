@@ -11,79 +11,65 @@ from mas_contribution_bench.evaluation.sandbox import SandboxConfig, SandboxResu
 
 
 IMPORT_RE = re.compile(r"^(?:from\s+\S+\s+import\s+.+|import\s+.+)$")
+ASSERT_RE = re.compile(r"^assert\s+.+")
 
 
-def _literal_list_from_line(line: str) -> list[str] | None:
+def _as_statement_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    if not text:
+        return []
     try:
-        value = ast.literal_eval(line.strip())
+        literal = ast.literal_eval(text)
     except Exception:
-        return None
-    if isinstance(value, list):
-        return [str(item) for item in value]
-    return None
-
-
-def _clean_statement(text: str) -> str:
-    item = text.strip()
-    while item and item[0] in "[,'\" ":
-        item = item[1:].strip()
-    while item and item[-1] in "],'\" ":
-        item = item[:-1].strip()
-    return item
-
-
-def _split_asserts(text: str) -> list[str]:
-    starts = [match.start() for match in re.finditer(r"\bassert\s+", text)]
-    statements: list[str] = []
-    for index, start in enumerate(starts):
-        end = starts[index + 1] if index + 1 < len(starts) else len(text)
-        statement = _clean_statement(text[start:end])
-        if statement.startswith("assert "):
-            statements.append(statement)
-    return statements
+        literal = None
+    if isinstance(literal, (list, tuple)):
+        return [str(item).strip() for item in literal if str(item).strip()]
+    return [line.strip().rstrip(",") for line in text.splitlines() if line.strip()]
 
 
 def parse_mbpp_tests(tests_blob: str | None) -> tuple[list[str], list[str]]:
-    if not tests_blob:
-        return [], []
-    imports: list[str] = []
+    """Return import/setup statements and assert statements for an MBPP task."""
+    imports_or_setup: list[str] = []
     asserts: list[str] = []
-    lines = [line.strip() for line in tests_blob.splitlines() if line.strip()]
-    for line in lines:
-        literal = _literal_list_from_line(line)
-        if literal is not None:
-            for item in literal:
-                item = item.strip()
-                if IMPORT_RE.match(item):
-                    imports.append(item)
-                elif item.startswith("assert "):
-                    asserts.append(item)
+    for statement in _as_statement_list(tests_blob):
+        if statement == "[]":
             continue
-        asserts.extend(_split_asserts(line))
-        if IMPORT_RE.match(line):
-            imports.append(line)
-    if not asserts:
-        asserts.extend(_split_asserts(tests_blob))
-    return imports, asserts
+        if IMPORT_RE.match(statement):
+            imports_or_setup.append(statement)
+        elif ASSERT_RE.match(statement):
+            asserts.append(statement)
+        elif "assert " in statement:
+            # Fallback for legacy processed rows that accidentally packed many
+            # asserts into one string. This is intentionally conservative.
+            for part in re.split(r"(?=\bassert\s+)", statement):
+                part = part.strip().strip(",")
+                if ASSERT_RE.match(part):
+                    asserts.append(part)
+        else:
+            imports_or_setup.append(statement)
+    return imports_or_setup, asserts
+
+
+def _ensure_entry_point_present(code: str, entry_point: str | None) -> None:
+    if entry_point and not re.search(rf"^\s*def\s+{re.escape(entry_point)}\s*\(", code, flags=re.MULTILINE):
+        raise ValueError(f"Prediction does not define required MBPP entry point: {entry_point}")
 
 
 def build_mbpp_program(task: dict[str, Any], prediction: str | None) -> str:
     code = extract_python_code(prediction)
     if not code:
         raise ValueError("Empty prediction")
-    imports, asserts = parse_mbpp_tests(task.get("tests"))
+    imports_or_setup, asserts = parse_mbpp_tests(task.get("tests"))
     if not asserts:
         raise ValueError("MBPP task has no assert tests")
-    return "\n".join(
-        [
-            *imports,
-            "",
-            code,
-            "",
-            *asserts,
-            "",
-        ]
-    )
+    _ensure_entry_point_present(code, task.get("entry_point"))
+    return "\n".join([*imports_or_setup, "", code, "", *asserts, ""])
 
 
 def evaluate_mbpp(
