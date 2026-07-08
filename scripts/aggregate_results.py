@@ -18,11 +18,35 @@ if str(SRC_ROOT) not in sys.path:
 from mas_contribution_bench.utils.io import ensure_dir, iter_jsonl, write_jsonl  # noqa: E402
 
 
+DEFAULT_EXCLUDE_TOKENS = (
+    ".backup_",
+    "backup_",
+    "_repair_",
+    "repair_smoke",
+    "repair_medium",
+    "smoke",
+)
+
+
+def should_collect_path(path: Path, exclude_tokens: tuple[str, ...] = DEFAULT_EXCLUDE_TOKENS) -> bool:
+    """Return False for backup/debug-validation files.
+
+    Formal aggregation should not mix corrected full-system results with old
+    backups or MBPP repair smoke/medium validation runs. The source files remain
+    on disk for provenance, but paper tables should aggregate only current
+    formal experiment outputs unless the caller explicitly changes the inputs.
+    """
+    relative = str(path.relative_to(PROJECT_ROOT))
+    return not any(token in relative for token in exclude_tokens)
+
+
 def collect_jsonl(root: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     if not root.exists():
         return records
     for path in sorted(root.rglob("*.jsonl")):
+        if not should_collect_path(path):
+            continue
         for record in iter_jsonl(path):
             record = dict(record)
             record["_source_file"] = str(path.relative_to(PROJECT_ROOT))
