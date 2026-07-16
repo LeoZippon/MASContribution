@@ -1,161 +1,163 @@
 id: exp05_topology_intervention
 stage: 5
 name: Role-preserving topology rewiring
-purpose: Separate topology effects from role effects by fixing roles, permissions, model, and tasks while
-  changing communication topology.
+purpose: Separate topology effects from role effects by fixing roles, permissions, model, and tasks while changing communication topology.
+
 depends_on:
-- exp03_loo_attribution
-- exp04_shapley_banzhaf_attribution
+  - exp03_loo_attribution
+  - exp04_shapley_attribution
+
 research_questions:
-- RQ4
-- RQ6
+  - RQ4
+  - RQ6
+
 hypotheses:
-- H1
-- H2
-- H3
-- H8
+  - H1
+  - H2
+  - H3
+  - H8
+
 datasets:
-- name: humaneval
-  task_file: data/processed/tasks/humaneval_tasks.jsonl
-  split: test
-  max_tasks: 100
-  task_selection: deterministic_first
-- name: mbpp
-  task_file: data/processed/tasks/mbpp_tasks.jsonl
-  split: test
-  max_tasks: 200
-  task_selection: deterministic_first
+  - name: humaneval
+    task_file: data/processed/tasks/humaneval_tasks.jsonl
+    split: test
+    max_tasks: 100
+    task_selection: deterministic_first
+
+  - name: mbpp
+    task_file: data/processed/tasks/mbpp_tasks.jsonl
+    split: test
+    max_tasks: 200
+    task_selection: deterministic_first
+
 controlled_role_set:
-- planner
-- coder
-- verifier
-- critic
-- finalizer
+  - planner
+  - coder
+  - verifier
+  - critic
+  - finalizer
+
 controlled_permission_set:
   planner: planner
   coder: coder
   verifier: verifier
   critic: critic
   finalizer: finalizer
+
 topology_variants:
-- id: controlled_chain
-  template: chain
-  edges:
-  - - planner
-    - coder
-  - - coder
-    - verifier
-  - - verifier
-    - critic
-  - - critic
-    - finalizer
-  - - finalizer
-    - final_answer
-- id: controlled_star
-  template: star
-  center: finalizer
-  edges:
-  - - finalizer
-    - planner
-  - - planner
-    - finalizer
-  - - finalizer
-    - coder
-  - - coder
-    - finalizer
-  - - finalizer
-    - verifier
-  - - verifier
-    - finalizer
-  - - finalizer
-    - critic
-  - - critic
-    - finalizer
-  - - finalizer
-    - final_answer
-- id: controlled_dag
-  template: dag
-  edges:
-  - - planner
-    - coder
-  - - planner
-    - verifier
-  - - coder
-    - critic
-  - - verifier
-    - critic
-  - - critic
-    - finalizer
-  - - finalizer
-    - final_answer
-- id: controlled_debate
-  template: debate
-  edges:
-  - - planner
-    - coder
-  - - coder
-    - planner
-  - - planner
-    - verifier
-  - - verifier
-    - planner
-  - - coder
-    - critic
-  - - critic
-    - coder
-  - - verifier
-    - critic
-  - - critic
-    - verifier
-  - - planner
-    - finalizer
-  - - coder
-    - finalizer
-  - - verifier
-    - finalizer
-  - - critic
-    - finalizer
-  - - finalizer
-    - final_answer
+  - id: controlled_chain
+    template: chain
+    description: Linear Planner -> Coder -> Verifier -> Critic -> Finalizer workflow.
+    edges:
+      - [planner, coder]
+      - [coder, verifier]
+      - [verifier, critic]
+      - [critic, finalizer]
+      - [finalizer, final_answer]
+
+  - id: controlled_star
+    template: star
+    center: finalizer
+    description: Finalizer-centered star topology where all non-finalizer roles communicate through the finalizer.
+    edges:
+      - [finalizer, planner]
+      - [planner, finalizer]
+      - [finalizer, coder]
+      - [coder, finalizer]
+      - [finalizer, verifier]
+      - [verifier, finalizer]
+      - [finalizer, critic]
+      - [critic, finalizer]
+      - [finalizer, final_answer]
+
+  - id: controlled_dag
+    template: dag
+    description: Planner branches to coding and verification paths, then critic integrates before finalizer.
+    edges:
+      - [planner, coder]
+      - [planner, verifier]
+      - [coder, critic]
+      - [verifier, critic]
+      - [critic, finalizer]
+      - [finalizer, final_answer]
+
+  - id: controlled_debate
+    template: debate
+    description: Bidirectional debate among planner, coder, verifier, and critic before finalization.
+    edges:
+      - [planner, coder]
+      - [coder, planner]
+      - [planner, verifier]
+      - [verifier, planner]
+      - [coder, critic]
+      - [critic, coder]
+      - [verifier, critic]
+      - [critic, verifier]
+      - [planner, finalizer]
+      - [coder, finalizer]
+      - [verifier, finalizer]
+      - [critic, finalizer]
+      - [finalizer, final_answer]
+
 attribution:
   methods:
-  - loo
-  - shapley_sampled
+    - loo
+    - shapley_sampled
+
+  utility: task
   removal_protocol: null_agent_replacement
-  permutation_samples: 64
+
+  shapley:
+    num_permutations: 8
+    coalition_cache: true
+
+  save_coalition_scores: true
+
 analysis:
+  compare_with:
+    - exp03_loo_attribution
+    - exp04_shapley_attribution
+
   topology_features:
-  - degree
-  - in_degree
-  - out_degree
-  - betweenness
-  - closeness
-  - pagerank
-  - dag_depth
-  - fan_in
-  - fan_out
+    - degree
+    - in_degree
+    - out_degree
+    - betweenness
+    - closeness
+    - pagerank
+    - dag_depth
+    - fan_in
+    - fan_out
+
   tests:
-  - paired_test
-  - mixed_effects_regression
+    - paired_test
+    - mixed_effects_regression
+
 seeds:
-- 0
-- 1
-- 2
+  - 0
+  - 1
+  - 2
+
 outputs:
   run_dir: data/runs/interventions/topology
   trace_dir: data/traces/interventions/topology
   attribution_file: data/results/attribution/topology_intervention_attribution.jsonl
+  coalition_file: data/results/attribution/topology_intervention_coalitions.jsonl
   statistics_file: data/results/statistics/topology_intervention.jsonl
+  score_file: data/results/scores/exp05_topology_intervention_scores.jsonl
+
 benchmark_specs:
   architecture_dir: configs/benchmark_specs/architectures
   agent_dir: configs/benchmark_specs/agents
   prompt_dir: configs/benchmark_specs/prompts
   permission_file: configs/benchmark_specs/permissions/permission_sets.yaml
+
 model:
   name: ${MODEL_NAME}
   homogeneous: true
   temperature: 0.2
   max_tokens: 2048
+
 logging:
   save_run_records: true
   save_full_trace: true
@@ -164,14 +166,15 @@ logging:
   save_cost: true
   save_failure_type: true
   trace_graphs:
-  - design_graph
-  - trace_graph
-  - dependency_graph
+    - design_graph
+    - trace_graph
+    - dependency_graph
+
 evaluation:
   primary_utility: task
   secondary_utilities:
-  - net
-  - process
+    - net
+    - process
   code_task_metric: pass_at_1
   non_code_task_metric: official_score
   bootstrap_confidence_interval: true
