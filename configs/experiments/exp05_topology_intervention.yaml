@@ -153,7 +153,8 @@ benchmark_specs:
   permission_file: configs/benchmark_specs/permissions/permission_sets.yaml
 
 model:
-  name: ${MODEL_NAME}
+  backend: deepseek
+  name: deepseek-v4-flash
   homogeneous: true
   temperature: 0.2
   max_tokens: 2048

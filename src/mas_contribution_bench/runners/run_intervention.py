@@ -1,12 +1,541 @@
-"""Intervention runner placeholders with schema-compatible outputs."""
+"""Run intervention experiments with schema-compatible outputs."""
 
 from __future__ import annotations
 
+import math
+import os
+import random
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from mas_contribution_bench.runners.run_attribution import run_loo_attribution
+from mas_contribution_bench.data.schemas import (
+    AttributionMethod,
+    AttributionRecord,
+    CoalitionInfo,
+    RemovalProtocol,
+)
+from mas_contribution_bench.graphs.architectures import controlled_architecture
+from mas_contribution_bench.runners.common import (
+    backup_existing_file,
+    load_experiment,
+    print_progress,
+    run_mas_once,
+    select_tasks,
+)
+from mas_contribution_bench.utils.io import append_jsonl, iter_jsonl, stable_id
+
+
+FALLBACK_ROLE_PRIORITY = [
+    "coder",
+    "executor",
+    "verifier",
+    "tester",
+    "critic",
+    "reviewer",
+    "debugger",
+    "planner",
+    "researcher",
+    "retriever",
+    "supervisor",
+    "memory_manager",
+    "tool_agent",
+    "finalizer",
+    "aggregator",
+]
+
+
+def _use_checkpointing() -> bool:
+    return os.getenv("MAS_DISABLE_CHECKPOINT", "").lower() not in {"1", "true", "yes", "y"}
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _standard_error(values: list[float]) -> float | None:
+    if len(values) <= 1:
+        return None
+    avg = _mean(values)
+    variance = sum((x - avg) ** 2 for x in values) / (len(values) - 1)
+    return math.sqrt(variance) / math.sqrt(len(values))
+
+
+def _completed_attribution_ids(path: Path) -> set[str]:
+    return {str(row.get("attribution_id")) for row in iter_jsonl(path) if row.get("attribution_id")}
+
+
+def _load_coalition_cache(path: Path) -> dict[str, dict[str, Any]]:
+    cache: dict[str, dict[str, Any]] = {}
+    for row in iter_jsonl(path):
+        key = row.get("coalition_id")
+        if key:
+            cache[str(key)] = row
+    return cache
+
+
+def _cfg_int(cfg: dict[str, Any], *paths: str, default: int) -> int:
+    for path in paths:
+        current: Any = cfg
+        ok = True
+        for part in path.split("."):
+            if not isinstance(current, dict) or part not in current:
+                ok = False
+                break
+            current = current[part]
+        if ok and current is not None:
+            try:
+                return int(current)
+            except (TypeError, ValueError):
+                pass
+    return default
+
+
+def _normalize_method(method: str) -> str:
+    if method == "sampled_shapley":
+        return "shapley_sampled"
+    if method == "sampled_banzhaf":
+        return "banzhaf_sampled"
+    return method
+
+
+def _variant_edges(variant: dict[str, Any]) -> list[tuple[str, str]]:
+    edges = []
+    for edge in variant.get("edges", []):
+        if len(edge) != 2:
+            continue
+        src, dst = edge
+        edges.append((str(src), str(dst)))
+    return edges
+
+
+def _graph_feature_row(variant_id: str, variant: dict[str, Any], roles: list[str]) -> dict[str, Any]:
+    edges = _variant_edges(variant)
+    role_set = set(roles)
+    in_degree = {role: 0 for role in roles}
+    out_degree = {role: 0 for role in roles}
+
+    for src, dst in edges:
+        if src in role_set:
+            out_degree[src] += 1
+        if dst in role_set:
+            in_degree[dst] += 1
+
+    return {
+        "variant_id": variant_id,
+        "template": variant.get("template"),
+        "center": variant.get("center"),
+        "num_roles": len(roles),
+        "num_edges": len(edges),
+        "roles": roles,
+        "edges": [[src, dst] for src, dst in edges],
+        "degree": {role: in_degree[role] + out_degree[role] for role in roles},
+        "in_degree": in_degree,
+        "out_degree": out_degree,
+        "fan_in": max(in_degree.values()) if in_degree else 0,
+        "fan_out": max(out_degree.values()) if out_degree else 0,
+        "fallback_final_answer_policy": {
+            "enabled": True,
+            "policy": "nearest_upstream_non_null_agent",
+            "tie_breaker": "solution_bearing_role_priority",
+            "role_priority": FALLBACK_ROLE_PRIORITY,
+        },
+    }
+
+
+def _clone_architecture(base_architecture: Any, variant: dict[str, Any], roles: list[str]) -> Any:
+    variant_id = str(variant["id"])
+    raw = dict(variant)
+    raw["roles"] = list(roles)
+    raw["controlled_role_set"] = list(roles)
+    raw["edges"] = [[src, dst] for src, dst in _variant_edges(variant)]
+    raw["name"] = variant.get("description", variant_id)
+    raw["family"] = variant.get("template", "controlled")
+    raw["entrypoint"] = roles[0] if roles else ""
+    raw["terminal_nodes"] = ["final_answer"]
+
+    orchestration = dict(raw.get("orchestration", {}))
+    orchestration["fallback_final_answer"] = {
+        "enabled": True,
+        "policy": "nearest_upstream_non_null_agent",
+        "tie_breaker": "solution_bearing_role_priority",
+        "role_priority": FALLBACK_ROLE_PRIORITY,
+    }
+    raw["orchestration"] = orchestration
+
+    return controlled_architecture(raw, architecture_id=variant_id)
+
+
+def _inject_topology_variants(experiment: Any) -> list[tuple[str, list[str], dict[str, Any]]]:
+    roles = [str(role) for role in experiment.raw.get("controlled_role_set", [])]
+    variants = experiment.raw.get("topology_variants", [])
+
+    if not roles:
+        raise ValueError("exp05 requires controlled_role_set.")
+    if not variants:
+        raise ValueError("exp05 requires topology_variants.")
+
+    architectures = getattr(experiment.benchmark, "architectures", {})
+    if not architectures:
+        raise ValueError("No benchmark architectures loaded; cannot build controlled topology variants.")
+
+    base_architecture = next(iter(architectures.values()))
+
+    injected: list[tuple[str, list[str], dict[str, Any]]] = []
+    for variant in variants:
+        variant_id = str(variant["id"])
+        architectures[variant_id] = _clone_architecture(base_architecture, variant, roles)
+        injected.append((variant_id, roles, variant))
+
+    return injected
+
+
+def _coalition_key(
+    experiment_id: str,
+    task_id: str,
+    architecture_id: str,
+    seed: int,
+    active_agents: set[str] | list[str] | tuple[str, ...],
+) -> str:
+    return stable_id(experiment_id, task_id, architecture_id, seed, "coalition", sorted(active_agents))
+
+
+def run_topology_intervention(config_path: str | Path, max_tasks: int | None = None) -> dict[str, Any]:
+    experiment = load_experiment(config_path)
+    tasks = select_tasks(experiment)
+    if max_tasks is not None:
+        tasks = tasks[:max_tasks]
+
+    topology_variants = _inject_topology_variants(experiment)
+    seeds = [int(seed) for seed in experiment.raw.get("seeds", [0])]
+    attribution_cfg = experiment.raw.get("attribution", {})
+    methods = [_normalize_method(str(m)) for m in attribution_cfg.get("methods", ["loo"])]
+    methods = [m for m in methods if m in {"loo", "shapley_sampled"}]
+    if not methods:
+        methods = ["loo"]
+
+    protocol = str(attribution_cfg.get("removal_protocol", "null_agent_replacement"))
+    shapley_samples = _cfg_int(
+        attribution_cfg,
+        "shapley.num_permutations",
+        "shapley.num_samples",
+        "num_samples",
+        "permutation_samples",
+        default=8,
+    )
+
+    outputs = experiment.raw.get("outputs", {})
+    root = experiment.benchmark.project_root
+
+    run_path = root / f"{outputs.get('run_dir', 'data/runs/interventions/topology')}/runs.jsonl"
+    trace_path = root / f"{outputs.get('trace_dir', 'data/traces/interventions/topology')}/{experiment.experiment_id}_traces.jsonl"
+    attribution_path = root / outputs.get(
+        "attribution_file",
+        "data/results/attribution/topology_intervention_attribution.jsonl",
+    )
+    coalition_path = root / outputs.get(
+        "coalition_file",
+        "data/results/attribution/topology_intervention_coalitions.jsonl",
+    )
+    evaluation_path = root / outputs.get(
+        "score_file",
+        f"data/results/scores/{experiment.experiment_id}_scores.jsonl",
+    )
+    statistics_path = root / outputs.get(
+        "statistics_file",
+        "data/results/statistics/topology_intervention.jsonl",
+    )
+
+    fresh = os.getenv("MAS_FRESH_RUN", "").lower() in {"1", "true", "yes", "y"}
+    if _use_checkpointing() and fresh:
+        for file_path in (run_path, trace_path, attribution_path, coalition_path, evaluation_path, statistics_path):
+            backup = backup_existing_file(file_path)
+            if backup:
+                print_progress(f"[backup] {file_path} -> {backup}")
+            file_path.unlink(missing_ok=True)
+
+    done_attr = _completed_attribution_ids(attribution_path) if _use_checkpointing() else set()
+    coalition_cache = _load_coalition_cache(coalition_path) if _use_checkpointing() else {}
+
+    total = len(tasks) * len(seeds) * sum(len(roles) * len(methods) for _, roles, _ in topology_variants)
+    completed = len(done_attr)
+
+    written_runs = 0
+    written_traces = 0
+    written_evaluations = 0
+    written_attribution = 0
+    written_coalitions = 0
+
+    print_progress(
+        f"[start] experiment={experiment.experiment_id} variants={len(topology_variants)} "
+        f"methods={methods} total_attributions={total} already_done={completed}"
+    )
+
+    feature_rows = [
+        _graph_feature_row(variant_id, variant, roles)
+        for variant_id, roles, variant in topology_variants
+    ]
+    if feature_rows and not statistics_path.exists():
+        append_jsonl(statistics_path, feature_rows)
+
+    def evaluate_coalition(
+        task: dict[str, Any],
+        architecture_id: str,
+        seed: int,
+        roles: list[str],
+        active_agents: set[str],
+    ) -> dict[str, Any]:
+        nonlocal written_runs, written_traces, written_evaluations, written_coalitions
+
+        active_agents = set(active_agents)
+        removed_agents = set(roles) - active_agents
+        coalition_id = _coalition_key(
+            experiment.experiment_id,
+            str(task["task_id"]),
+            architecture_id,
+            seed,
+            active_agents,
+        )
+
+        cached = coalition_cache.get(coalition_id)
+        if cached is not None:
+            return cached
+
+        print_progress(
+            f"[coalition] task={task['task_id']} topology={architecture_id} seed={seed} "
+            f"active={sorted(active_agents)} removed={sorted(removed_agents)}"
+        )
+        run, traces, evaluation = run_mas_once(
+            experiment,
+            task,
+            architecture_id,
+            int(seed),
+            removed_agents=removed_agents,
+            removal_protocol=protocol,
+        )
+
+        row = {
+            "coalition_id": coalition_id,
+            "experiment_id": experiment.experiment_id,
+            "task_id": task["task_id"],
+            "dataset": task["dataset"],
+            "architecture_id": architecture_id,
+            "topology_id": architecture_id,
+            "sampling_seed": int(seed),
+            "active_agents": sorted(active_agents),
+            "removed_agents": sorted(removed_agents),
+            "score": _as_float(evaluation.score),
+            "run_id": run.run_id,
+            "passed": getattr(evaluation, "passed", None),
+            "failure_type": getattr(evaluation, "failure_type", None),
+            "final_answer_policy": "nearest_upstream_non_null_agent",
+        }
+        coalition_cache[coalition_id] = row
+
+        append_jsonl(run_path, [run])
+        append_jsonl(trace_path, traces)
+        append_jsonl(evaluation_path, [evaluation])
+        append_jsonl(coalition_path, [row])
+
+        written_runs += 1
+        written_traces += len(traces)
+        written_evaluations += 1
+        written_coalitions += 1
+        return row
+
+    for task_index, task in enumerate(tasks, start=1):
+        for architecture_id, roles, variant in topology_variants:
+            role_set = set(roles)
+
+            for seed in seeds:
+                full_row = evaluate_coalition(task, architecture_id, int(seed), roles, role_set)
+                full_score = _as_float(full_row.get("score"))
+
+                if "loo" in methods:
+                    for agent in roles:
+                        attribution_id = stable_id(
+                            experiment.experiment_id,
+                            task["task_id"],
+                            architecture_id,
+                            seed,
+                            "loo",
+                            agent,
+                        )
+                        if attribution_id in done_attr:
+                            print_progress(f"[skip] {completed}/{total} method=loo topology={architecture_id} agent={agent}")
+                            continue
+
+                        active_agents = role_set - {agent}
+                        ablated_row = evaluate_coalition(task, architecture_id, int(seed), roles, active_agents)
+                        ablated_score = _as_float(ablated_row.get("score"))
+                        record = AttributionRecord(
+                            attribution_id=attribution_id,
+                            experiment_id=experiment.experiment_id,
+                            task_id=task["task_id"],
+                            dataset=task["dataset"],
+                            architecture_id=architecture_id,
+                            agent_id=agent,
+                            role=agent,
+                            method=AttributionMethod.LOO,
+                            utility_type=attribution_cfg.get("utility", "task"),
+                            score=full_score - ablated_score,
+                            baseline_score=0.0,
+                            coalition=CoalitionInfo(
+                                active_agents=sorted(active_agents),
+                                removed_agents=[agent],
+                            ),
+                            removal_protocol=RemovalProtocol(protocol),
+                            full_team_score=full_score,
+                            ablated_score=ablated_score,
+                            sampling_seed=int(seed),
+                            metadata={
+                                "topology_id": architecture_id,
+                                "topology_template": variant.get("template"),
+                                "full_coalition_id": full_row.get("coalition_id"),
+                                "ablated_coalition_id": ablated_row.get("coalition_id"),
+                                "final_answer_policy": "nearest_upstream_non_null_agent",
+                            },
+                        )
+                        append_jsonl(attribution_path, [record])
+                        done_attr.add(record.attribution_id)
+                        completed += 1
+                        written_attribution += 1
+                        print_progress(
+                            f"[done] {completed}/{total} method=loo task_index={task_index}/{len(tasks)} "
+                            f"topology={architecture_id} agent={agent} score={record.score}"
+                        )
+
+                if "shapley_sampled" in methods:
+                    rng = random.Random(
+                        stable_id(experiment.experiment_id, task["task_id"], architecture_id, seed, "shapley_sampled")
+                    )
+                    marginals_by_agent: dict[str, list[float]] = defaultdict(list)
+                    example_coalition_by_agent: dict[str, list[str]] = {}
+                    example_permutation_by_agent: dict[str, list[str]] = {}
+
+                    for sample_index in range(shapley_samples):
+                        permutation = list(roles)
+                        rng.shuffle(permutation)
+
+                        active: set[str] = set()
+                        prev_score = _as_float(
+                            evaluate_coalition(task, architecture_id, int(seed), roles, active).get("score")
+                        )
+
+                        for agent in permutation:
+                            before = set(active)
+                            active.add(agent)
+                            current_score = _as_float(
+                                evaluate_coalition(task, architecture_id, int(seed), roles, active).get("score")
+                            )
+                            marginal = current_score - prev_score
+                            marginals_by_agent[agent].append(marginal)
+                            example_coalition_by_agent.setdefault(agent, sorted(before))
+                            example_permutation_by_agent.setdefault(agent, permutation[:])
+                            prev_score = current_score
+
+                        print_progress(
+                            f"[sample] method=shapley_sampled task={task['task_id']} topology={architecture_id} "
+                            f"seed={seed} sample={sample_index + 1}/{shapley_samples}"
+                        )
+
+                    for agent in roles:
+                        attribution_id = stable_id(
+                            experiment.experiment_id,
+                            task["task_id"],
+                            architecture_id,
+                            seed,
+                            "shapley_sampled",
+                            agent,
+                        )
+                        if attribution_id in done_attr:
+                            print_progress(
+                                f"[skip] {completed}/{total} method=shapley_sampled topology={architecture_id} agent={agent}"
+                            )
+                            continue
+
+                        values = marginals_by_agent.get(agent, [])
+                        active_example = example_coalition_by_agent.get(agent, [])
+                        removed_example = [role for role in roles if role not in set(active_example)]
+
+                        record = AttributionRecord(
+                            attribution_id=attribution_id,
+                            experiment_id=experiment.experiment_id,
+                            task_id=task["task_id"],
+                            dataset=task["dataset"],
+                            architecture_id=architecture_id,
+                            agent_id=agent,
+                            role=agent,
+                            method=AttributionMethod("shapley_sampled"),
+                            utility_type=attribution_cfg.get("utility", "task"),
+                            score=_mean(values),
+                            baseline_score=0.0,
+                            coalition=CoalitionInfo(
+                                active_agents=active_example,
+                                removed_agents=removed_example,
+                            ),
+                            removal_protocol=RemovalProtocol(protocol),
+                            full_team_score=full_score,
+                            ablated_score=None,
+                            sampling_seed=int(seed),
+                            num_samples=len(values),
+                            permutation_order=example_permutation_by_agent.get(agent),
+                            standard_error=_standard_error(values),
+                            metadata={
+                                "topology_id": architecture_id,
+                                "topology_template": variant.get("template"),
+                                "marginal_values": values,
+                                "shapley_samples": shapley_samples,
+                                "final_answer_policy": "nearest_upstream_non_null_agent",
+                            },
+                        )
+                        append_jsonl(attribution_path, [record])
+                        done_attr.add(record.attribution_id)
+                        completed += 1
+                        written_attribution += 1
+                        print_progress(
+                            f"[done] {completed}/{total} method=shapley_sampled task_index={task_index}/{len(tasks)} "
+                            f"topology={architecture_id} agent={agent} score={record.score}"
+                        )
+
+    summary = {
+        "records": completed,
+        "new_records": written_attribution,
+        "runs": written_runs,
+        "traces": written_traces,
+        "evaluations": written_evaluations,
+        "coalitions": written_coalitions,
+        "variants": [variant_id for variant_id, _, _ in topology_variants],
+        "methods": methods,
+        "shapley_samples": shapley_samples if "shapley_sampled" in methods else 0,
+        "final_answer_policy": "nearest_upstream_non_null_agent",
+        "attribution_file": str(attribution_path),
+        "coalition_file": str(coalition_path),
+        "run_file": str(run_path),
+        "trace_file": str(trace_path),
+        "evaluation_file": str(evaluation_path),
+        "statistics_file": str(statistics_path),
+        "checkpointing": _use_checkpointing(),
+    }
+    print_progress(f"[complete] {summary}")
+    return summary
 
 
 def run_intervention(config_path: str | Path, max_tasks: int | None = None) -> dict[str, Any]:
-    return run_loo_attribution(config_path, max_tasks=max_tasks)
+    experiment = load_experiment(config_path)
+    if "topology_variants" in experiment.raw:
+        return run_topology_intervention(config_path, max_tasks=max_tasks)
+
+    raise NotImplementedError(
+        f"No intervention runner implemented for {experiment.experiment_id}. "
+        "Currently supported: topology_variants."
+    )
