@@ -125,6 +125,7 @@ def run_mas_once(
     result = graph.invoke({"task": task, "messages": []})
     trace_records = build_trace_records(run_id, task["task_id"], result.state)
     cost = trace_cost(trace_records)
+    cache_usage = summarize_agent_cache_usage(result.state)
     evaluation = evaluate_task_output(
         run_id=run_id,
         task=task,
@@ -150,9 +151,68 @@ def run_mas_once(
         status=RunStatus.SUCCEEDED,
         cost=cost,
         failure_type=evaluation.failure_type,
-        metadata={"dry_run": model_backend(experiment) in {"dry-run", "dry_run", "dryrun", "mock"}, "model_backend": model_backend(experiment)},
+        metadata={
+            "dry_run": model_backend(experiment) in {"dry-run", "dry_run", "dryrun", "mock"},
+            "model_backend": model_backend(experiment),
+            "cache_usage": cache_usage,
+        },
     )
     return run, trace_records, evaluation
+
+
+def summarize_agent_cache_usage(state: dict[str, Any]) -> dict[str, Any]:
+    """Aggregate provider/local cache metadata from agent outputs.
+
+    This is intentionally metadata-only: it does not change scoring, traces, or
+    final answers. It lets experiments report how much API work was served from
+    the local response cache or DeepSeek context cache.
+    """
+
+    outputs = state.get("agent_outputs") or {}
+    summary = {
+        "agents": 0,
+        "local_cache_hits": 0,
+        "local_cache_misses": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "provider_cache_hit_tokens": 0,
+        "provider_cache_miss_tokens": 0,
+    }
+
+    for output in outputs.values():
+        metadata = output.get("metadata") or {}
+        if metadata.get("null_agent"):
+            continue
+        usage = metadata.get("model_usage") or {}
+        cache = metadata.get("cache") or {}
+        summary["agents"] += 1
+        if cache.get("local_cache_hit") is True:
+            summary["local_cache_hits"] += 1
+        elif cache:
+            summary["local_cache_misses"] += 1
+
+        summary["prompt_tokens"] += int(usage.get("prompt_tokens") or output.get("input_tokens") or 0)
+        summary["completion_tokens"] += int(usage.get("completion_tokens") or output.get("output_tokens") or 0)
+        summary["total_tokens"] += int(usage.get("total_tokens") or 0)
+        summary["provider_cache_hit_tokens"] += int(
+            usage.get("prompt_cache_hit_tokens")
+            or cache.get("provider_cache_hit_tokens")
+            or 0
+        )
+        summary["provider_cache_miss_tokens"] += int(
+            usage.get("prompt_cache_miss_tokens")
+            or cache.get("provider_cache_miss_tokens")
+            or 0
+        )
+
+    provider_total = summary["provider_cache_hit_tokens"] + summary["provider_cache_miss_tokens"]
+    summary["provider_cache_hit_rate"] = (
+        summary["provider_cache_hit_tokens"] / provider_total if provider_total else None
+    )
+    local_total = summary["local_cache_hits"] + summary["local_cache_misses"]
+    summary["local_cache_hit_rate"] = summary["local_cache_hits"] / local_total if local_total else None
+    return summary
 
 
 

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import os
+from pathlib import Path
 import time
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 import requests
 
@@ -57,6 +60,8 @@ class DeepSeekModelClient:
     environment variables or a local .env file that is never committed.
     """
 
+    _shared_cache_indexes: ClassVar[dict[str, dict[str, dict[str, Any]]]] = {}
+
     def __init__(
         self,
         *,
@@ -73,12 +78,52 @@ class DeepSeekModelClient:
         self.timeout_seconds = timeout_seconds
         self.max_retries = int(os.getenv("DEEPSEEK_MAX_RETRIES", str(max_retries if max_retries is not None else 3)))
         self.retry_backoff_seconds = float(os.getenv("DEEPSEEK_RETRY_BACKOFF", str(retry_backoff_seconds if retry_backoff_seconds is not None else 2.0)))
+        self.last_usage: dict[str, Any] = {}
+        self.last_cache_metadata: dict[str, Any] = {}
+
+    def _cache_enabled(self) -> bool:
+        return os.getenv("MAS_LLM_CACHE_ENABLED", "1").lower() not in {"0", "false", "no", "n"}
+
+    def _cache_path(self, model: str) -> Path:
+        configured = os.getenv("MAS_LLM_CACHE_FILE")
+        if configured:
+            return Path(configured)
+        cache_dir = Path(os.getenv("MAS_LLM_CACHE_DIR", "data/cache/llm_calls"))
+        safe_model = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in model)
+        return cache_dir / f"deepseek_{safe_model}.jsonl"
+
+    def _cache_key(self, payload: dict[str, Any]) -> str:
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _load_cache_index(self, path: Path) -> dict[str, dict[str, Any]]:
+        cache_id = str(path)
+        if cache_id in self._shared_cache_indexes:
+            return self._shared_cache_indexes[cache_id]
+        index: dict[str, dict[str, Any]] = {}
+        if path.exists():
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    key = row.get("cache_key")
+                    if key:
+                        index[str(key)] = row
+        self._shared_cache_indexes[cache_id] = index
+        return index
+
+    def _append_cache_row(self, path: Path, row: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def complete(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
-        api_key = self.api_key or os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            raise RuntimeError("DEEPSEEK_API_KEY is not set. Export it before using MAS_MODEL_BACKEND=deepseek.")
-
+        self.last_usage = {}
+        self.last_cache_metadata = {}
         model = kwargs.get("model") or self.default_model
         if isinstance(model, str) and model.startswith("${"):
             model = self.default_model
@@ -91,6 +136,26 @@ class DeepSeekModelClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        cache_path = self._cache_path(str(model))
+        cache_key = self._cache_key(payload)
+        if self._cache_enabled():
+            cache_index = self._load_cache_index(cache_path)
+            cached = cache_index.get(cache_key)
+            if cached is not None:
+                self.last_usage = dict(cached.get("usage") or {})
+                self.last_cache_metadata = {
+                    "local_cache_hit": True,
+                    "local_cache_key": cache_key,
+                    "local_cache_path": str(cache_path),
+                    "provider_cache_hit_tokens": self.last_usage.get("prompt_cache_hit_tokens", 0),
+                    "provider_cache_miss_tokens": self.last_usage.get("prompt_cache_miss_tokens", 0),
+                }
+                return str(cached.get("content", ""))
+
+        api_key = self.api_key or os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise RuntimeError("DEEPSEEK_API_KEY is not set. Export it before using MAS_MODEL_BACKEND=deepseek.")
+
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
@@ -118,9 +183,31 @@ class DeepSeekModelClient:
         else:
             raise RuntimeError(f"DeepSeek API request failed: {last_error}")
         try:
-            return data["choices"][0]["message"]["content"] or ""
+            content = data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError(f"Unexpected DeepSeek response: {data}") from exc
+        self.last_usage = dict(data.get("usage") or {})
+        self.last_cache_metadata = {
+            "local_cache_hit": False,
+            "local_cache_key": cache_key,
+            "local_cache_path": str(cache_path),
+            "provider_cache_hit_tokens": self.last_usage.get("prompt_cache_hit_tokens", 0),
+            "provider_cache_miss_tokens": self.last_usage.get("prompt_cache_miss_tokens", 0),
+        }
+        if self._cache_enabled():
+            row = {
+                "cache_key": cache_key,
+                "created_at": int(time.time()),
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "messages": messages,
+                "content": content,
+                "usage": self.last_usage,
+            }
+            self._append_cache_row(cache_path, row)
+            self._load_cache_index(cache_path)[cache_key] = row
+        return content
 
 
 class BaseAgent:
@@ -173,13 +260,22 @@ class BaseAgent:
             task_id=(state.get("task") or {}).get("task_id"),
             **self.model_kwargs,
         )
+        usage = dict(getattr(self.model_client, "last_usage", {}) or {})
+        cache_metadata = dict(getattr(self.model_client, "last_cache_metadata", {}) or {})
         input_tokens = sum(len(m["content"].split()) for m in messages)
         output_tokens = len(content.split())
+        if usage:
+            input_tokens = int(usage.get("prompt_tokens") or input_tokens)
+            output_tokens = int(usage.get("completion_tokens") or output_tokens)
         return AgentOutput(
             agent_id=self.agent_id,
             role=self.role,
             content=content,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            metadata={"permissions": self.permissions},
+            metadata={
+                "permissions": self.permissions,
+                "model_usage": usage,
+                "cache": cache_metadata,
+            },
         )

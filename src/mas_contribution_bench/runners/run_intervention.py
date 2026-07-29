@@ -274,6 +274,7 @@ def run_topology_intervention(config_path: str | Path, max_tasks: int | None = N
     written_evaluations = 0
     written_attribution = 0
     written_coalitions = 0
+    coalition_cache_hits = 0
 
     print_progress(
         f"[start] experiment={experiment.experiment_id} variants={len(topology_variants)} "
@@ -294,7 +295,7 @@ def run_topology_intervention(config_path: str | Path, max_tasks: int | None = N
         roles: list[str],
         active_agents: set[str],
     ) -> dict[str, Any]:
-        nonlocal written_runs, written_traces, written_evaluations, written_coalitions
+        nonlocal written_runs, written_traces, written_evaluations, written_coalitions, coalition_cache_hits
 
         active_agents = set(active_agents)
         removed_agents = set(roles) - active_agents
@@ -308,6 +309,7 @@ def run_topology_intervention(config_path: str | Path, max_tasks: int | None = N
 
         cached = coalition_cache.get(coalition_id)
         if cached is not None:
+            coalition_cache_hits += 1
             return cached
 
         print_progress(
@@ -357,6 +359,44 @@ def run_topology_intervention(config_path: str | Path, max_tasks: int | None = N
             role_set = set(roles)
 
             for seed in seeds:
+                pending_loo = [
+                    agent
+                    for agent in roles
+                    if stable_id(
+                        experiment.experiment_id,
+                        task["task_id"],
+                        architecture_id,
+                        seed,
+                        "loo",
+                        agent,
+                    )
+                    not in done_attr
+                ]
+                pending_shapley = [
+                    agent
+                    for agent in roles
+                    if stable_id(
+                        experiment.experiment_id,
+                        task["task_id"],
+                        architecture_id,
+                        seed,
+                        "shapley_sampled",
+                        agent,
+                    )
+                    not in done_attr
+                ]
+                if "loo" not in methods:
+                    pending_loo = []
+                if "shapley_sampled" not in methods:
+                    pending_shapley = []
+                if not pending_loo and not pending_shapley:
+                    completed_for_group = len(roles) * len(methods)
+                    print_progress(
+                        f"[skip-group] task_index={task_index}/{len(tasks)} topology={architecture_id} "
+                        f"seed={seed} completed_attributions={completed_for_group}"
+                    )
+                    continue
+
                 full_row = evaluate_coalition(task, architecture_id, int(seed), roles, role_set)
                 full_score = _as_float(full_row.get("score"))
 
@@ -415,6 +455,12 @@ def run_topology_intervention(config_path: str | Path, max_tasks: int | None = N
                         )
 
                 if "shapley_sampled" in methods:
+                    if not pending_shapley:
+                        print_progress(
+                            f"[skip] {completed}/{total} method=shapley_sampled topology={architecture_id} "
+                            f"seed={seed} all roles already done"
+                        )
+                        continue
                     rng = random.Random(
                         stable_id(experiment.experiment_id, task["task_id"], architecture_id, seed, "shapley_sampled")
                     )
@@ -514,6 +560,8 @@ def run_topology_intervention(config_path: str | Path, max_tasks: int | None = N
         "traces": written_traces,
         "evaluations": written_evaluations,
         "coalitions": written_coalitions,
+        "coalition_cache_hits": coalition_cache_hits,
+        "coalition_cache_entries": len(coalition_cache),
         "variants": [variant_id for variant_id, _, _ in topology_variants],
         "methods": methods,
         "shapley_samples": shapley_samples if "shapley_sampled" in methods else 0,
