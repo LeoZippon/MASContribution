@@ -1,7 +1,8 @@
-id: exp06_role_intervention
-stage: 6
-name: Topology-preserving role swap
-purpose: Determine whether contribution follows the role label or remains with the graph position.
+id: exp06_role_intervention_mbpp_validation
+stage: 6b
+name: MBPP role-intervention validation subset
+purpose: Validate whether topology-preserving role-swap findings from HumanEval also
+  appear on an MBPP subset under lower-cost Shapley sampling.
 depends_on:
 - exp03_loo_attribution
 - exp05_topology_intervention
@@ -12,15 +13,10 @@ hypotheses:
 - H3
 - H5
 datasets:
-- name: humaneval
-  task_file: data/processed/tasks/humaneval_tasks.jsonl
-  split: test
-  max_tasks: 100
-  task_selection: deterministic_first
 - name: mbpp
   task_file: data/processed/tasks/mbpp_tasks.jsonl
   split: test
-  max_tasks: 200
+  max_tasks: 20
   task_selection: deterministic_first
 base_architectures:
 - A2_chain
@@ -72,7 +68,8 @@ attribution:
   - loo
   - shapley_sampled
   removal_protocol: null_agent_replacement
-  permutation_samples: 64
+  permutation_samples: 16
+  coalition_cache: true
 analysis:
   effect_targets:
   - role_effect
@@ -86,12 +83,13 @@ seeds:
 - 1
 - 2
 outputs:
-  run_dir: data/runs/interventions/role
-  trace_dir: data/traces/interventions/role
-  attribution_file: data/results/attribution/role_intervention_attribution.jsonl
-  coalition_file: data/results/attribution/role_intervention_coalitions.jsonl
-  score_file: data/results/scores/exp06_role_intervention_scores.jsonl
-  statistics_file: data/results/statistics/role_intervention.jsonl
+  run_dir: data/runs/interventions/role_mbpp_validation
+  trace_dir: data/traces/interventions/role_mbpp_validation
+  attribution_file: data/results/attribution/role_intervention_mbpp_validation_attribution.jsonl
+  coalition_file: data/results/attribution/role_intervention_mbpp_validation_coalitions.jsonl
+  score_file: data/results/scores/exp06_role_intervention_mbpp_validation_scores.jsonl
+  evaluation_file: data/results/scores/exp06_role_intervention_mbpp_validation_scores.jsonl
+  statistics_file: data/results/statistics/role_intervention_mbpp_validation.jsonl
 benchmark_specs:
   architecture_dir: configs/benchmark_specs/architectures
   agent_dir: configs/benchmark_specs/agents
@@ -121,3 +119,8 @@ evaluation:
   code_task_metric: pass_at_1
   non_code_task_metric: official_score
   bootstrap_confidence_interval: true
+architectures:
+  include:
+  - A2_chain
+  - A3_dag
+  - A5_star

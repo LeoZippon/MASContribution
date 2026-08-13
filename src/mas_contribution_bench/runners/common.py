@@ -103,16 +103,45 @@ def run_mas_once(
     seed: int,
     removed_agents: set[str] | None = None,
     removal_protocol: str = "none",
+    agent_role_map: dict[str, str] | None = None,
+    condition_id: str | None = None,
 ) -> tuple[RunRecord, list[Any], Any]:
     set_seed(seed)
     architecture = experiment.benchmark.architectures[architecture_id]
     active_roles = [role for role in architecture.roles if role not in (removed_agents or set())]
-    agents = build_agents(
+    model_client = build_model_client(experiment)
+    role_map = {
+        role: str((agent_role_map or {}).get(role, role))
+        for role in architecture.roles
+    }
+    functional_roles = sorted(set(architecture.roles) | set(role_map.values()))
+    functional_agents = build_agents(
         experiment.benchmark.agents,
-        architecture.roles,
-        model_client=build_model_client(experiment),
+        functional_roles,
+        model_client=model_client,
         model_overrides=experiment.raw.get("model", {}),
     )
+    agents = {}
+    for position_role in architecture.roles:
+        functional_role = role_map.get(position_role, position_role)
+        if functional_role not in functional_agents:
+            raise ValueError(
+                f"Cannot build role intervention agent: functional role {functional_role!r} "
+                f"for graph position {position_role!r} is not available in benchmark agents."
+            )
+        source_agent = functional_agents[functional_role]
+        if functional_role == position_role:
+            agents[position_role] = source_agent
+            continue
+        position_agent = functional_agents[position_role]
+        agents[position_role] = source_agent.__class__(
+            agent_id=position_role,
+            role=functional_role,
+            prompt=source_agent.prompt,
+            permissions=position_agent.permissions,
+            model_client=source_agent.model_client,
+            model_kwargs=source_agent.model_kwargs,
+        )
     null_replacement = removal_protocol == "null_agent_replacement"
     graph = MASGraphBuilder(
         architecture=architecture,
@@ -120,7 +149,16 @@ def run_mas_once(
         removed_agents=removed_agents or set(),
         null_replacement=null_replacement,
     ).build()
-    run_id = stable_id(experiment.experiment_id, task["task_id"], architecture_id, seed, sorted(removed_agents or []))
+    role_map_items = sorted(role_map.items())
+    run_id = stable_id(
+        experiment.experiment_id,
+        task["task_id"],
+        architecture_id,
+        seed,
+        sorted(removed_agents or []),
+        condition_id or "default",
+        role_map_items,
+    )
     started = datetime.now(timezone.utc)
     result = graph.invoke({"task": task, "messages": []})
     trace_records = build_trace_records(run_id, task["task_id"], result.state)
@@ -155,6 +193,9 @@ def run_mas_once(
             "dry_run": model_backend(experiment) in {"dry-run", "dry_run", "dryrun", "mock"},
             "model_backend": model_backend(experiment),
             "cache_usage": cache_usage,
+            "condition_id": condition_id,
+            "agent_role_map": role_map,
+            "role_intervention": any(position != functional for position, functional in role_map.items()),
         },
     )
     return run, trace_records, evaluation
