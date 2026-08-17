@@ -15,18 +15,17 @@ datasets:
 - name: humaneval
   task_file: data/processed/tasks/humaneval_tasks.jsonl
   split: test
-  max_tasks: 100
+  max_tasks: 10
   task_selection: deterministic_first
 - name: mbpp
   task_file: data/processed/tasks/mbpp_tasks.jsonl
   split: test
-  max_tasks: 200
+  max_tasks: 20
   task_selection: deterministic_first
 base_architectures:
 - A2_chain
 - A3_dag
 - A5_star
-- A7_graph
 permission_interventions:
 - id: verifier_tool_access
   role: verifier
@@ -78,7 +77,7 @@ attribution:
   - loo
   - shapley_sampled
   removal_protocol: null_agent_replacement
-  permutation_samples: 64
+  permutation_samples: 16
 analysis:
   effect_targets:
   - tool_access_effect
@@ -99,6 +98,9 @@ outputs:
   run_dir: data/runs/interventions/permission
   trace_dir: data/traces/interventions/permission
   attribution_file: data/results/attribution/permission_intervention_attribution.jsonl
+  coalition_file: data/results/attribution/permission_intervention_coalitions.jsonl
+  score_file: data/results/scores/exp07_permission_intervention_scores.jsonl
+  evaluation_file: data/results/scores/exp07_permission_intervention_scores.jsonl
   statistics_file: data/results/statistics/permission_intervention.jsonl
 benchmark_specs:
   architecture_dir: configs/benchmark_specs/architectures

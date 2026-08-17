@@ -104,6 +104,7 @@ def run_mas_once(
     removed_agents: set[str] | None = None,
     removal_protocol: str = "none",
     agent_role_map: dict[str, str] | None = None,
+    permission_overrides: dict[str, dict[str, bool]] | None = None,
     condition_id: str | None = None,
 ) -> tuple[RunRecord, list[Any], Any]:
     set_seed(seed)
@@ -130,15 +131,24 @@ def run_mas_once(
                 f"for graph position {position_role!r} is not available in benchmark agents."
             )
         source_agent = functional_agents[functional_role]
-        if functional_role == position_role:
-            agents[position_role] = source_agent
-            continue
         position_agent = functional_agents[position_role]
+        permissions = dict(position_agent.permissions)
+        permissions.update({k: bool(v) for k, v in (permission_overrides or {}).get(position_role, {}).items()})
+        if functional_role == position_role:
+            agents[position_role] = source_agent.__class__(
+                agent_id=position_role,
+                role=functional_role,
+                prompt=source_agent.prompt,
+                permissions=permissions,
+                model_client=source_agent.model_client,
+                model_kwargs=source_agent.model_kwargs,
+            )
+            continue
         agents[position_role] = source_agent.__class__(
             agent_id=position_role,
             role=functional_role,
             prompt=source_agent.prompt,
-            permissions=position_agent.permissions,
+            permissions=permissions,
             model_client=source_agent.model_client,
             model_kwargs=source_agent.model_kwargs,
         )
@@ -158,9 +168,17 @@ def run_mas_once(
         sorted(removed_agents or []),
         condition_id or "default",
         role_map_items,
+        sorted((role, sorted(values.items())) for role, values in (permission_overrides or {}).items()),
     )
     started = datetime.now(timezone.utc)
-    result = graph.invoke({"task": task, "messages": []})
+    result = graph.invoke(
+        {
+            "task": task,
+            "messages": [],
+            "respect_final_answer_permission": bool(permission_overrides),
+            "permission_overrides": permission_overrides or {},
+        }
+    )
     trace_records = build_trace_records(run_id, task["task_id"], result.state)
     cost = trace_cost(trace_records)
     cache_usage = summarize_agent_cache_usage(result.state)
@@ -195,7 +213,9 @@ def run_mas_once(
             "cache_usage": cache_usage,
             "condition_id": condition_id,
             "agent_role_map": role_map,
+            "permission_overrides": permission_overrides or {},
             "role_intervention": any(position != functional for position, functional in role_map.items()),
+            "permission_intervention": bool(permission_overrides),
         },
     )
     return run, trace_records, evaluation

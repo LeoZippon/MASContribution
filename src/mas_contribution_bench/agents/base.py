@@ -242,6 +242,15 @@ class BaseAgent:
             task_details.append(f"Required entry point: {task.get('entry_point')}")
         if task.get("tests"):
             task_details.append(f"Visible tests/assertions:\n{task.get('tests')}")
+        permission_lines = [
+            f"- {name}: {str(value).lower()}"
+            for name, value in sorted(self.permissions.items())
+        ]
+        task_details.append(
+            "Current role permissions:\n"
+            + "\n".join(permission_lines)
+            + "\nOnly perform actions and claim authority that are enabled above."
+        )
         user_content = (
             "\n\n".join(task_details)
             + f"\n\nRecent collaboration history:\n{history_text}"

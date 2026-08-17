@@ -164,10 +164,29 @@ class MASGraphBuilder:
         content = output.get("content") or ""
         return not str(content).strip()
 
+    def _has_final_answer_permission(self, output: dict[str, Any] | None) -> bool:
+        if not output:
+            return False
+        permissions = (output.get("metadata") or {}).get("permissions") or {}
+        return bool(permissions.get("final_answer", False))
+
+    def _respect_final_answer_permission(self, state: dict[str, Any]) -> bool:
+        return bool(state.get("respect_final_answer_permission", False))
+
     def _default_final_answer(self, state: dict[str, Any], order: list[str]) -> str:
         final_role = self._final_role(order)
         if final_role and final_role in state["agent_outputs"]:
-            return str(state["agent_outputs"][final_role].get("content", ""))
+            output = state["agent_outputs"][final_role]
+            if not self._respect_final_answer_permission(state) or self._has_final_answer_permission(output):
+                return str(output.get("content", ""))
+
+        if self._respect_final_answer_permission(state):
+            for role in reversed(order):
+                output = state.get("agent_outputs", {}).get(role)
+                if self._is_null_output(output):
+                    continue
+                if self._has_final_answer_permission(output):
+                    return str(output.get("content", ""))
 
         if state["agent_outputs"]:
             return str(list(state["agent_outputs"].values())[-1].get("content", ""))
@@ -196,13 +215,34 @@ class MASGraphBuilder:
 
         candidates = fallback_final_answer_roles(self.architecture, role_priority=role_priority)
 
+        authorized_candidates = []
+        fallback_candidates = []
         for role in candidates:
             output = state.get("agent_outputs", {}).get(role)
             if self._is_null_output(output):
                 continue
+            if self._respect_final_answer_permission(state):
+                if self._has_final_answer_permission(output):
+                    authorized_candidates.append(role)
+                else:
+                    fallback_candidates.append(role)
+                continue
             return str(output.get("content", ""))
 
-        for role in reversed(order):
+        if authorized_candidates:
+            output = state.get("agent_outputs", {}).get(authorized_candidates[0])
+            return str(output.get("content", "")) if output else ""
+
+        remaining = list(reversed(order))
+        if self._respect_final_answer_permission(state):
+            for role in remaining:
+                output = state.get("agent_outputs", {}).get(role)
+                if self._is_null_output(output):
+                    continue
+                if self._has_final_answer_permission(output):
+                    return str(output.get("content", ""))
+
+        for role in fallback_candidates + remaining:
             output = state.get("agent_outputs", {}).get(role)
             if self._is_null_output(output):
                 continue
